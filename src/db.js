@@ -1,24 +1,44 @@
 import Dexie from 'dexie';
 
-// Создаем базу данных "WMS_Database" в браузере
 export const db = new Dexie('WMS_Database');
 
-// Описываем таблицы:
-// stocks: ++id (авто-номер), barcode (для поиска), goodid (ID товара), objectid (ID склада)
-db.version(1).stores({
-  stocks: '++id, barcode, goodid, objectid',
-  sync_queue: '++id, status'
+db.version(3).stores({
+  stocks: '++id, barcode, articulstore, objectid',
+  sync_queue: '++id, status',
+  // Таблица для всех объектов (склады и люди)
+  entities: '++id, roleid, number, note', 
+  marketplaces: '++id, name'
 });
 
-// Функция для начального заполнения (чтобы было что упаковывать)
 export const initMocks = async () => {
-  const count = await db.stocks.count();
-  if (count === 0) {
-    await db.stocks.bulkAdd([
-      { goodid: 101, barcode: '111', articulstore: 'Кроссовки Nike', qty: 10, objectid: 1, type: 'Обувь' },
-      { goodid: 102, barcode: '222', articulstore: 'Футболка Adidas', qty: 5, objectid: 1, type: 'Одежда' },
-      { goodid: 101, barcode: '111', articulstore: 'Кроссовки Nike', qty: 2, objectid: 2, type: 'Обувь' },
+  const entCount = await db.entities.count();
+  if (entCount === 0) {
+    // 1. Загружаем Контрагентов (Управляющих маркетплейсов) - roleid 7
+    await db.entities.bulkAdd([
+      { id: 701, roleid: 7, number: '9001112233', note: 'ИП Иванов (Manager WB)' },
+      { id: 702, roleid: 7, number: '9004445566', note: 'ООО Вектор (Manager Ozon)' }
     ]);
-    console.log("Данные загружены!");
+
+    // 2. Загружаем Склады - roleid 5
+    await db.stocks.bulkAdd([
+  { articulstore: '352420842BLUE', size: '30', length: '32', qty: 10, objectid: 501 },
+  { articulstore: '352420842BLUE', size: '31', length: '32', qty: 15, objectid: 501 },
+  { articulstore: '352420842BLUE', size: '32', length: '32', qty: 30, objectid: 502 },
+  { articulstore: '44556677RED', size: 'L', length: '180', qty: 20, objectid: 501 }
+]);
+
+    // 3. Маркетплейсы
+    await db.marketplaces.bulkAdd([
+      { id: 1, name: 'Wildberries' },
+      { id: 2, name: 'Ozon' }
+    ]);
+
+    // 4. Остатки (привязаны к objectid склада)
+    await db.stocks.bulkAdd([
+      { articulstore: '352420842BLUE', size: '32', length: '34', qty: 10, objectid: 501 },
+      { articulstore: '352420842BLUE', size: '34', length: '34', qty: 5, objectid: 501 },
+      { articulstore: '352420842BLUE', size: '32', length: '34', qty: 8, objectid: 502 },
+      { articulstore: '44556677RED', size: 'L', length: '180', qty: 20, objectid: 501 }
+    ]);
   }
 };
