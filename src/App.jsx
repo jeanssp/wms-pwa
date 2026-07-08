@@ -1,25 +1,62 @@
+// wms-pwa/src/App.jsx
 import { useEffect, useState } from 'react';
-import { db, initMocks } from './db';
+import { db } from './db';
+import { wmsApi } from './api';
 
 function App() {
   const [manager, setManager] = useState(localStorage.getItem('selectedManager'));
   const [market, setMarket] = useState(localStorage.getItem('selectedMarket'));
-  
-  // 'list' (Артикулы) -> 'sku_list' (Размеры) -> 'warehouse_list' (Склады)
   const [view, setView] = useState('list'); 
-  
   const [entities, setEntities] = useState([]);
   const [stocks, setStocks] = useState([]);
   const [selectedArticul, setSelectedArticul] = useState(null);
-  const [selectedSku, setSelectedSku] = useState(null); // Хранит выбранный {size, length}
+  const [selectedSku, setSelectedSku] = useState(null);
+  
+  // Статус для крутилки
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  useEffect(() => {
-    const load = async () => {
-      await initMocks();
+  // Главная функция обмена с сервером
+  const performSync = async () => {
+    setIsSyncing(true);
+    try {
+      // 1. Отправляем локальные списания (Push)
+      const queue = await db.sync_queue.toArray();
+      if (queue.length > 0 && navigator.onLine) {
+        await wmsApi.syncUp(queue);
+        await db.sync_queue.clear();
+        console.log('Данные успешно отправлены на сервер');
+      }
+
+      // 2. Скачиваем свежие остатки (Pull)
+      if (navigator.onLine) {
+        const data = await wmsApi.syncDown();
+        console.log("ДАННЫЕ С СЕРВЕРА:", data.entities);
+        if (data.success) {
+          // Транзакционное обновление локальной БД
+          await db.transaction('rw', db.stocks, db.entities, async () => {
+            await db.stocks.clear();
+            await db.entities.clear();
+            await db.stocks.bulkAdd(data.stocks);
+            await db.entities.bulkAdd(data.entities);
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Ошибка синхронизации (интернет или токен):', err);
+    } finally {
+      // Загружаем то, что есть (даже если интернета не было)
       setEntities(await db.entities.toArray());
       setStocks(await db.stocks.toArray());
-    };
-    load();
+      setIsSyncing(false);
+    }
+  };
+
+  // Запускаем синхронизацию при первом открытии
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      performSync();
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   const saveSettings = (mng, mrk) => {
@@ -29,37 +66,36 @@ function App() {
     setMarket(mrk);
   };
 
-  const warehouses = entities.filter(e => e.roleid === 5);
+  const warehouses = entities.filter(e => Number(e.roleid) === 5);
   const articulList = [...new Set(stocks.map(s => s.articulstore))];
 
-  // Вход
   if (!manager || !market) {
     return (
       <div style={{ padding: '20px' }}>
         <h3>Вход в систему</h3>
-        <select onChange={(e) => setManager(e.target.value)} style={selectStyle}>
-          <option value="">-- Управляющий --</option>
-          {entities.filter(e => e.roleid === 7).map(m => <option key={m.id} value={m.note}>{m.note}</option>)}
-        </select>
-        <select onChange={(e) => setMarket(e.target.value)} style={selectStyle}>
-          <option value="">-- Маркетплейс --</option>
-          <option value="Wildberries">Wildberries</option>
-          <option value="Ozon">Ozon</option>
-        </select>
-        <button onClick={() => saveSettings(manager, market)} style={mainBtnStyle}>ВОЙТИ</button>
+        {isSyncing ? <p>⏳ Загрузка складов с сервера...</p> : (
+          <>
+            <select onChange={(e) => setManager(e.target.value)} style={selectStyle}>
+              <option value="">-- Выберите Управляющего --</option>
+              {entities.filter(e => Number(e.roleid) === 7).map(m => <option key={m.id} value={m.note}>{m.note}</option>)}
+            </select>
+            <select onChange={(e) => setMarket(e.target.value)} style={selectStyle}>
+              <option value="">-- Маркетплейс --</option>
+              <option value="Wildberries">Wildberries</option>
+              <option value="Ozon">Ozon</option>
+            </select>
+            <button onClick={() => saveSettings(manager, market)} style={mainBtnStyle}>ВОЙТИ</button>
+          </>
+        )}
       </div>
     );
   }
 
-  // --- ЛОГИКА ---
-  
-  // 1. Кнопка "РАСХОД" в шапке (открывает список размеров)
   const openExpense = () => {
     if (!selectedArticul) return alert("Сначала выделите артикул из списка!");
     setView('sku_list');
   };
 
-  // 2. Группируем уникальные размеры (SKU) для выбранного артикула
   const currentArticulStocks = stocks.filter(s => s.articulstore === selectedArticul);
   const uniqueSkus = [];
   const skuSet = new Set();
@@ -72,28 +108,41 @@ function App() {
     }
   });
 
-  // 3. Отправка товара со склада
-  const handleSend = async (item) => {
+const handleSend = async (item) => {
     if (item.qty <= 0) return alert("Нет в наличии!");
-    
+
+    // НОВОЕ: Находим ID управляющего (роль 7) по выбранному в селекте имени
+    const selectedManagerObj = entities.find(e => e.note === manager && Number(e.roleid) === 7);
+    if (!selectedManagerObj) return alert("Ошибка: не выбран реализатор");
+
+    // 1. Списываем визуально
     await db.stocks.update(item.id, { qty: item.qty - 1 });
+    
+    // 2. Кладем в очередь ПРАВИЛЬНЫЕ данные
     await db.sync_queue.add({
       type: 'SEND_TO_MARKET',
-      sku: `${item.articulstore}_${item.size}_${item.length}`,
-      from_wh: item.objectid,
+      goodid: item.goodid,               // ИЗМЕНЕНО: Добавлен ID партии
+      from_wh: Number(item.objectid),            // ID склада
+     manager_id: Number(selectedManagerObj.id), // ИЗМЕНЕНО: Числовой ID реализатора
+      marketplace: market,
       timestamp: new Date().toISOString()
     });
+    
     setStocks(await db.stocks.toArray());
-    alert("Товар отправлен!");
+    
+    // Сразу пробуем отправить
+    performSync(); 
   };
 
-  // --- ИНТЕРФЕЙС ---
   return (
     <div style={{ fontFamily: 'Arial, sans-serif' }}>
-      
-      {/* ШАПКА */}
       <div style={headerStyle}>
-        <div style={{ marginBottom: '10px' }}>{manager} | {market}</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+          <div>{manager} | {market}</div>
+          <div style={{ fontSize: '12px', color: isSyncing ? '#f39c12' : '#2ecc71' }}>
+            {isSyncing ? '⏳ Синхронизация...' : '✅ Обновлено'}
+          </div>
+        </div>
         <div style={{ display: 'flex', gap: '5px' }}>
           <button onClick={() => setView('list')} style={navBtnStyle}>СПИСОК</button>
           <button onClick={openExpense} style={{ ...navBtnStyle, background: '#e67e22' }}>РАСХОД</button>
@@ -103,8 +152,6 @@ function App() {
       </div>
 
       <div style={{ padding: '15px' }}>
-        
-        {/* ЭКРАН 1: Список Артикулов */}
         {view === 'list' && (
           <div>
             <h4>Выберите артикул:</h4>
@@ -120,12 +167,10 @@ function App() {
           </div>
         )}
 
-        {/* ЭКРАН 2: Список Размеров (SKU) */}
         {view === 'sku_list' && (
           <div>
             <button onClick={() => setView('list')} style={backBtnStyle}>← Назад к артикулам</button>
             <h4>Размеры для: {selectedArticul}</h4>
-            
             {uniqueSkus.map(sku => {
               const skuName = `${selectedArticul}_${sku.size}_${sku.length}`;
               return (
@@ -142,7 +187,6 @@ function App() {
           </div>
         )}
 
-        {/* ЭКРАН 3: Список Складов для конкретного размера */}
         {view === 'warehouse_list' && (
           <div>
             <button onClick={() => setView('sku_list')} style={backBtnStyle}>← Назад к размерам</button>
@@ -169,7 +213,6 @@ function App() {
             }
           </div>
         )}
-        
       </div>
     </div>
   );
@@ -184,6 +227,15 @@ const skuCardStyle = { border: '1px solid #ddd', padding: '15px', marginBottom: 
 const actionBtnStyle = { width: '100%', padding: '12px', background: '#3498db', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold' };
 const selectStyle = { width: '100%', padding: '10px', marginBottom: '10px' };
 const mainBtnStyle = { width: '100%', padding: '12px', background: '#2ecc71', color: 'white', border: 'none', borderRadius: '5px' };
-const backBtnStyle = { marginBottom: '15px', padding: '8px 15px', border: '1px solid #ccc', borderRadius: '5px', background: 'white', cursor: 'pointer' };
+const backBtnStyle = { 
+  marginBottom: '15px', 
+  padding: '8px 15px', 
+  border: '1px solid #ccc', 
+  borderRadius: '5px', 
+  background: 'white', 
+  color: '#2c3e50', // ИЗМЕНЕНО: Принудительный темный цвет текста
+  cursor: 'pointer',
+  fontWeight: 'bold'
+};
 
 export default App;
