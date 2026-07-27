@@ -49,8 +49,9 @@ function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  const filteredStocks = useMemo(() => {
-    const isSearchActive = searchQuery.length >= 4;
+   const filteredStocks = useMemo(() => {
+    // CHANGED: Снизили порог поиска до 3 символов для коротких артикулов
+    const isSearchActive = searchQuery.length >= 3;
     const query = searchQuery.toLowerCase();
 
     return stocks.filter(item => {
@@ -59,12 +60,15 @@ function App() {
                              item.barcodes_str?.toLowerCase().includes(query) ||
                              item.aliases_str?.toLowerCase().includes(query);
                              
+        // CHANGED: Принудительно конвертируем roleid в число Number(), чтобы избежать бага со строками
+        const entity = entities.find(e => Number(e.id) === Number(item.objectid));
         const isValidRole = mode === 'EXPENSE' 
-          ? entities.find(e => Number(e.id) === Number(item.objectid))?.roleid === 5 
-          : entities.find(e => Number(e.id) === Number(item.objectid))?.roleid === 7;
+          ? Number(entity?.roleid) === 5 
+          : Number(entity?.roleid) === 7;
           
         return matchesQuery && isValidRole;
       }
+      
       
       const currentFilter = mode === 'EXPENSE' ? enabledWarehouses : enabledRealizers;
       return currentFilter.includes(Number(item.objectid));
