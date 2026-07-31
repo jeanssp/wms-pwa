@@ -1,3 +1,4 @@
+
 import { useEffect, useState, useMemo } from 'react';
 import { db } from './db';
 import { wmsApi } from './api';
@@ -13,9 +14,14 @@ function App() {
   
   const [isSyncing, setIsSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  
-  const [enabledWarehouses, setEnabledWarehouses] = useState(JSON.parse(localStorage.getItem('wms_enabled_warehouses')) || []);
-  const [enabledRealizers, setEnabledRealizers] = useState(JSON.parse(localStorage.getItem('wms_enabled_realizers')) || []);
+
+  // CHANGED: Принудительное преобразование ID складов в числа для исключения конфликтов типов
+  const [enabledWarehouses, setEnabledWarehouses] = useState(
+    (JSON.parse(localStorage.getItem('wms_enabled_warehouses')) || []).map(Number)
+  );
+  const [enabledRealizers, setEnabledRealizers] = useState(
+    (JSON.parse(localStorage.getItem('wms_enabled_realizers')) || []).map(Number)
+  );
 
   const performSync = async () => {
     setIsSyncing(true);
@@ -36,8 +42,9 @@ function App() {
           });
         }
       }
-    } catch (err) { console.error('Sync error:', err); }
-    finally {
+    } catch (err) { 
+      console.error('Sync error:', err); 
+    } finally {
       setEntities(await db.entities.toArray());
       setStocks(await db.stocks.toArray());
       setIsSyncing(false);
@@ -49,8 +56,8 @@ function App() {
     return () => clearTimeout(timer);
   }, []);
 
-   const filteredStocks = useMemo(() => {
-    // CHANGED: Снизили порог поиска до 3 символов для коротких артикулов
+  const filteredStocks = useMemo(() => {
+    // CHANGED: Порог активации поиска — от 3 символов
     const isSearchActive = searchQuery.length >= 3;
     const query = searchQuery.toLowerCase();
 
@@ -60,7 +67,6 @@ function App() {
                              item.barcodes_str?.toLowerCase().includes(query) ||
                              item.aliases_str?.toLowerCase().includes(query);
                              
-        // CHANGED: Принудительно конвертируем roleid в число Number(), чтобы избежать бага со строками
         const entity = entities.find(e => Number(e.id) === Number(item.objectid));
         const isValidRole = mode === 'EXPENSE' 
           ? Number(entity?.roleid) === 5 
@@ -69,21 +75,27 @@ function App() {
         return matchesQuery && isValidRole;
       }
       
-      
       const currentFilter = mode === 'EXPENSE' ? enabledWarehouses : enabledRealizers;
-      return currentFilter.includes(Number(item.objectid));
+      // CHANGED: Безопасная проверка числовых совпадений ID складов
+      return currentFilter.some(id => Number(id) === Number(item.objectid));
     });
   }, [stocks, searchQuery, enabledWarehouses, enabledRealizers, mode, entities]);
 
   const articulList = useMemo(() => [...new Set(filteredStocks.map(s => s.articulstore))], [filteredStocks]);
 
+  // CHANGED: Переключение галочек фильтров с числовой конвертацией
   const toggleFilter = (id) => {
+    const numId = Number(id);
     if (mode === 'EXPENSE') {
-      const newSelection = enabledWarehouses.includes(id) ? enabledWarehouses.filter(wId => wId !== id) : [...enabledWarehouses, id];
+      const newSelection = enabledWarehouses.some(wId => Number(wId) === numId) 
+        ? enabledWarehouses.filter(wId => Number(wId) !== numId) 
+        : [...enabledWarehouses, numId];
       setEnabledWarehouses(newSelection);
       localStorage.setItem('wms_enabled_warehouses', JSON.stringify(newSelection));
     } else {
-      const newSelection = enabledRealizers.includes(id) ? enabledRealizers.filter(rId => rId !== id) : [...enabledRealizers, id];
+      const newSelection = enabledRealizers.some(rId => Number(rId) === numId) 
+        ? enabledRealizers.filter(rId => Number(rId) !== numId) 
+        : [...enabledRealizers, rId];
       setEnabledRealizers(newSelection);
       localStorage.setItem('wms_enabled_realizers', JSON.stringify(newSelection));
     }
@@ -96,6 +108,21 @@ function App() {
     setSelectedArticul(null);
   };
 
+  // CHANGED: Полная очистка локальной базы IndexedDB и настроек при сбросе
+  const handleReset = async () => {
+    localStorage.clear();
+    try {
+      await db.transaction('rw', db.stocks, db.entities, db.sync_queue, async () => {
+        await db.stocks.clear();
+        await db.entities.clear();
+        await db.sync_queue.clear();
+      });
+    } catch (e) {
+      console.error('Reset DB error:', e);
+    }
+    window.location.reload();
+  };
+
   const handleTransfer = async (item, targetEntity) => {
     if (item.qty <= 0) return alert("Нет в наличии!");
 
@@ -106,7 +133,7 @@ function App() {
       goodid: Number(item.goodid),
       from_wh: Number(item.objectid),
       to_wh: Number(targetEntity.id),
-      marketplace: targetEntity.note, // Передаем имя цели как комментарий
+      marketplace: targetEntity.note,
       timestamp: new Date().toISOString()
     });
     
@@ -133,7 +160,7 @@ function App() {
         <div style={{ display: 'flex', gap: '5px' }}>
           <button onClick={() => switchMode('EXPENSE')} style={{ ...navBtnStyle, background: mode === 'EXPENSE' ? '#e67e22' : '#95a5a6' }}>РАСХОД</button>
           <button onClick={() => switchMode('RETURN')} style={{ ...navBtnStyle, background: mode === 'RETURN' ? '#27ae60' : '#95a5a6' }}>ПРИХОД</button>
-          <button onClick={() => { localStorage.clear(); window.location.reload(); }} style={exitBtnStyle}>СБРОС</button>
+          <button onClick={handleReset} style={exitBtnStyle}>СБРОС</button>
         </div>
       </div>
 
@@ -145,7 +172,7 @@ function App() {
           <div style={{ position: 'relative', marginBottom: '15px' }}>
             <input 
               style={searchInputStyle}
-              placeholder="🔍 Артикул, штрихкод или алиас (от 4 знаков)..."
+              placeholder="🔍 Артикул, штрихкод или алиас (от 3 знаков)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -156,8 +183,8 @@ function App() {
               <label key={wh.id} style={whBadgeStyle}>
                 <input 
                   type="checkbox" 
-                  checked={(mode === 'EXPENSE' ? enabledWarehouses : enabledRealizers).includes(Number(wh.id))}
-                  onChange={() => toggleFilter(Number(wh.id))}
+                  checked={(mode === 'EXPENSE' ? enabledWarehouses : enabledRealizers).some(fId => Number(fId) === Number(wh.id))}
+                  onChange={() => toggleFilter(wh.id)}
                 /> {wh.note}
               </label>
             ))}
@@ -183,12 +210,12 @@ function App() {
           </div>
         )}
 
- {view === 'sku_list' && (
+        {view === 'sku_list' && (
           <div>
             <button onClick={() => setView('list')} style={backBtnStyle}>← К списку артикулов</button>
             <h4>Выбор размера (SKU): {selectedArticul}</h4>
             {[...new Set(filteredStocks.filter(s => s.articulstore === selectedArticul).map(s => `${s.size_name}_${s.length_id}`))].map(skuKey => {
-              // NEW: Расчет остатков и списка складов для каждого размера
+              // NEW: Суммирование остатков по всем выбранным складам для каждого размера
               const [sizeVal, lenVal] = skuKey.split('_');
               const skuItems = filteredStocks.filter(s => s.articulstore === selectedArticul && s.size_name === sizeVal && String(s.length_id) === String(lenVal));
               const totalQty = skuItems.reduce((sum, item) => sum + Number(item.qty), 0);
@@ -212,39 +239,74 @@ function App() {
           </div>
         )}
 
-        {view === 'target_list' && (
-          <div>
-            <button onClick={() => setView('sku_list')} style={backBtnStyle}>← К размерам</button>
-            <div style={infoBoxStyle}>Выбран SKU: {selectedArticul}_{selectedSku.size}_{selectedSku.length}</div>
-            
-            {filteredStocks
-              .filter(s => s.articulstore === selectedArticul && s.size_name === selectedSku.size && String(s.length_id) === String(selectedSku.length))
-              .map(item => (
-                <div key={`${item.goodid}-${item.objectid}`} style={skuCardStyle}>
-                  <div style={{ color: '#7f8c8d', fontSize: '13px' }}>
-                    {mode === 'EXPENSE' ? 'Списываем со склада:' : 'Забираем у реализатора:'} <b>{entities.find(e => Number(e.id) === Number(item.objectid))?.note}</b>
-                  </div>
-                  <div style={{ fontSize: '18px', margin: '10px 0' }}>Остаток: <b style={{color: '#27ae60'}}>{item.qty} шт.</b></div>
-                  
-                  <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px dashed #ddd' }}>
-                    <div style={{ fontSize: '13px', marginBottom: '10px', fontWeight: 'bold', color: '#2c3e50' }}>
-                      {mode === 'EXPENSE' ? 'КУДА ОТПРАВЛЯЕМ?' : 'НА КАКОЙ СКЛАД ВОЗВРАЩАЕМ?'}
-                    </div>
-                    {targetEntities.map(target => (
-                      <button 
-                        key={target.id} 
-                        onClick={() => handleTransfer(item, target)} 
-                        style={actionBtnStyle}
-                      >
-                        → {target.note}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))
+        {view === 'target_list' && (() => {
+          // NEW: Группировка дубликатов партий по складам (одна карточка на один склад с общей суммой)
+          const skuItems = filteredStocks.filter(
+            s => s.articulstore === selectedArticul && 
+                 s.size_name === selectedSku.size && 
+                 String(s.length_id) === String(selectedSku.length)
+          );
+
+          const warehouseMap = new Map();
+          skuItems.forEach(item => {
+            const objId = Number(item.objectid);
+            if (!warehouseMap.has(objId)) {
+              warehouseMap.set(objId, {
+                objectid: objId,
+                totalQty: 0,
+                items: []
+              });
             }
-          </div>
-        )}
+            const group = warehouseMap.get(objId);
+            group.totalQty += Number(item.qty);
+            group.items.push(item);
+          });
+
+          const warehouseGroups = Array.from(warehouseMap.values()).filter(g => g.totalQty > 0);
+
+          return (
+            <div>
+              <button onClick={() => setView('sku_list')} style={backBtnStyle}>← К размерам</button>
+              <div style={infoBoxStyle}>Выбран SKU: {selectedArticul}_{selectedSku.size}_{selectedSku.length}</div>
+              
+              {warehouseGroups.length === 0 && (
+                <p style={{ color: 'gray' }}>Нет доступных остатков на выбранных складах.</p>
+              )}
+
+              {warehouseGroups.map(group => {
+                const warehouseEntity = entities.find(e => Number(e.id) === group.objectid);
+                // Берём первую доступную партию с остатком для проведения списания
+                const activeItem = group.items.find(i => Number(i.qty) > 0) || group.items[0];
+
+                return (
+                  <div key={group.objectid} style={skuCardStyle}>
+                    <div style={{ color: '#7f8c8d', fontSize: '13px' }}>
+                      {mode === 'EXPENSE' ? 'Списываем со склада:' : 'Забираем у реализатора:'} <b>{warehouseEntity?.note || 'Склад'}</b>
+                    </div>
+                    <div style={{ fontSize: '18px', margin: '10px 0' }}>
+                      Общий остаток: <b style={{ color: '#27ae60' }}>{group.totalQty} шт.</b>
+                    </div>
+                    
+                    <div style={{ marginTop: '20px', paddingTop: '15px', borderTop: '1px dashed #ddd' }}>
+                      <div style={{ fontSize: '13px', marginBottom: '10px', fontWeight: 'bold', color: '#2c3e50' }}>
+                        {mode === 'EXPENSE' ? 'КУДА ОТПРАВЛЯЕМ?' : 'НА КАКОЙ СКЛАД ВОЗВРАЩАЕМ?'}
+                      </div>
+                      {targetEntities.map(target => (
+                        <button 
+                          key={target.id} 
+                          onClick={() => handleTransfer(activeItem, target)} 
+                          style={actionBtnStyle}
+                        >
+                          → {target.note}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
