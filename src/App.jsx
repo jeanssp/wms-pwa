@@ -183,20 +183,32 @@ function App() {
           </div>
         )}
 
-        {view === 'sku_list' && (
+ {view === 'sku_list' && (
           <div>
             <button onClick={() => setView('list')} style={backBtnStyle}>← К списку артикулов</button>
             <h4>Выбор размера (SKU): {selectedArticul}</h4>
-            {[...new Set(filteredStocks.filter(s => s.articulstore === selectedArticul).map(s => `${s.size_name}_${s.length_id}`))].map(skuKey => (
+            {[...new Set(filteredStocks.filter(s => s.articulstore === selectedArticul).map(s => `${s.size_name}_${s.length_id}`))].map(skuKey => {
+              // NEW: Расчет остатков и списка складов для каждого размера
+              const [sizeVal, lenVal] = skuKey.split('_');
+              const skuItems = filteredStocks.filter(s => s.articulstore === selectedArticul && s.size_name === sizeVal && String(s.length_id) === String(lenVal));
+              const totalQty = skuItems.reduce((sum, item) => sum + Number(item.qty), 0);
+              const whNames = skuItems.map(item => entities.find(e => Number(e.id) === Number(item.objectid))?.note).filter(Boolean).join(', ');
+
+              return (
                 <div key={skuKey} onClick={() => { 
-                  const [s, l] = skuKey.split('_');
-                  setSelectedSku({size: s, length: l}); 
+                  setSelectedSku({size: sizeVal, length: lenVal}); 
                   setView('target_list'); 
-                }} style={{...cardStyle, background: '#f8f9fa'}}>
-                  <b>{selectedArticul}_{skuKey}</b>
-                  <span style={{ float: 'right', color: '#3498db', fontSize: '14px' }}>Указать склад →</span>
+                }} style={{...cardStyle, background: '#f8f9fa', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                  <div>
+                    <b style={{ fontSize: '16px' }}>{selectedArticul}_{skuKey}</b>
+                    <div style={{ fontSize: '13px', color: '#27ae60', marginTop: '4px' }}>
+                      В наличии: <b>{totalQty} шт.</b> ({whNames || 'Склад не указан'})
+                    </div>
+                  </div>
+                  <span style={{ color: '#3498db', fontSize: '14px', fontWeight: 'bold' }}>Выбрать размер →</span>
                 </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
