@@ -15,6 +15,7 @@ function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+
   // CHANGED: Принудительное преобразование ID складов в числа для исключения конфликтов типов
   const [enabledWarehouses, setEnabledWarehouses] = useState(
     (JSON.parse(localStorage.getItem('wms_enabled_warehouses')) || []).map(Number)
@@ -84,18 +85,22 @@ function App() {
   const articulList = useMemo(() => [...new Set(filteredStocks.map(s => s.articulstore))], [filteredStocks]);
 
   // CHANGED: Переключение галочек фильтров с числовой конвертацией
+
+  // CHANGED: Переключение фильтра с универсальным аргументом item
   const toggleFilter = (id) => {
     const numId = Number(id);
     if (mode === 'EXPENSE') {
-      const newSelection = enabledWarehouses.some(wId => Number(wId) === numId) 
-        ? enabledWarehouses.filter(wId => Number(wId) !== numId) 
+      const exists = enabledWarehouses.some(item => Number(item) === numId);
+      const newSelection = exists 
+        ? enabledWarehouses.filter(item => Number(item) !== numId) 
         : [...enabledWarehouses, numId];
       setEnabledWarehouses(newSelection);
       localStorage.setItem('wms_enabled_warehouses', JSON.stringify(newSelection));
     } else {
-      const newSelection = enabledRealizers.some(rId => Number(rId) === numId) 
-        ? enabledRealizers.filter(rId => Number(rId) !== numId) 
-        : [...enabledRealizers, rId];
+      const exists = enabledRealizers.some(item => Number(item) === numId);
+      const newSelection = exists 
+        ? enabledRealizers.filter(item => Number(item) !== numId) 
+        : [...enabledRealizers, numId];
       setEnabledRealizers(newSelection);
       localStorage.setItem('wms_enabled_realizers', JSON.stringify(newSelection));
     }
