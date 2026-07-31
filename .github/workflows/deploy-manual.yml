@@ -1,0 +1,24 @@
+name: Manual Deploy WMS PWA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            cd /var/www
+            if [ ! -d "wms-pwa" ]; then
+              git clone https://github.com/jeanssp/wms-pwa.git
+            fi
+            cd wms-pwa
+            git pull origin main
+            npm install
+            npm run build
