@@ -278,13 +278,14 @@ function App() {
           </div>
         )}
 
-        {view === 'sku_list' && (
+          {view === 'sku_list' && (
           <div>
             <button onClick={() => setView('list')} style={backBtnStyle}>← К списку артикулов</button>
             <h4>Выбор размера (SKU): {selectedArticul}</h4>
-            {[...new Set(filteredStocks.filter(s => s.articulstore === selectedArticul).map(s => `${s.size_name}_${s.length_id}`))].map(skuKey => {
+            {/* CHANGED: Ищем размеры и считаем остатки по ВСЕМ складам из stocks (игнорируя галочки фильтров) */}
+            {[...new Set(stocks.filter(s => s.articulstore === selectedArticul).map(s => `${s.size_name}_${s.length_id}`))].map(skuKey => {
               const [sizeVal, lenVal] = skuKey.split('_');
-              const skuItems = filteredStocks.filter(s => s.articulstore === selectedArticul && s.size_name === sizeVal && String(s.length_id) === String(lenVal));
+              const skuItems = stocks.filter(s => s.articulstore === selectedArticul && s.size_name === sizeVal && String(s.length_id) === String(lenVal));
               const totalQty = skuItems.reduce((sum, item) => sum + Number(item.qty), 0);
               const whNames = skuItems.map(item => entities.find(e => Number(e.id) === Number(item.objectid))?.note).filter(Boolean).join(', ');
 
@@ -306,8 +307,9 @@ function App() {
           </div>
         )}
 
-        {view === 'target_list' && (() => {
-          const skuItems = filteredStocks.filter(
+       {view === 'target_list' && (() => {
+          // CHANGED: Ищем склады списания по ВСЕМ складам из stocks (полностью игнорируя верхние галочки)
+          const skuItems = stocks.filter(
             s => s.articulstore === selectedArticul && 
                  s.size_name === selectedSku.size && 
                  String(s.length_id) === String(selectedSku.length)
