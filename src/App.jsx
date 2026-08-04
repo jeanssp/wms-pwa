@@ -1,4 +1,3 @@
-
 import { useEffect, useState, useMemo } from 'react';
 import { db } from './db';
 import { wmsApi } from './api';
@@ -15,8 +14,11 @@ function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // NEW: Считываем персональный ключ сотрудника из локальной памяти Chrome
+  const [wmsKey, setWmsKey] = useState(localStorage.getItem('wms_access_key') || '');
+  const [inputKey, setInputKey] = useState('');
 
-  // CHANGED: Принудительное преобразование ID складов в числа для исключения конфликтов типов
+  // CHANGED: Конвертируем ID складов в числа для исключения конфликтов типов
   const [enabledWarehouses, setEnabledWarehouses] = useState(
     (JSON.parse(localStorage.getItem('wms_enabled_warehouses')) || []).map(Number)
   );
@@ -58,7 +60,6 @@ function App() {
   }, []);
 
   const filteredStocks = useMemo(() => {
-    // CHANGED: Порог активации поиска — от 3 символов
     const isSearchActive = searchQuery.length >= 3;
     const query = searchQuery.toLowerCase();
 
@@ -77,16 +78,12 @@ function App() {
       }
       
       const currentFilter = mode === 'EXPENSE' ? enabledWarehouses : enabledRealizers;
-      // CHANGED: Безопасная проверка числовых совпадений ID складов
       return currentFilter.some(id => Number(id) === Number(item.objectid));
     });
   }, [stocks, searchQuery, enabledWarehouses, enabledRealizers, mode, entities]);
 
   const articulList = useMemo(() => [...new Set(filteredStocks.map(s => s.articulstore))], [filteredStocks]);
 
-  // CHANGED: Переключение галочек фильтров с числовой конвертацией
-
-  // CHANGED: Переключение фильтра с универсальным аргументом item
   const toggleFilter = (id) => {
     const numId = Number(id);
     if (mode === 'EXPENSE') {
@@ -113,7 +110,6 @@ function App() {
     setSelectedArticul(null);
   };
 
-  // CHANGED: Полная очистка локальной базы IndexedDB и настроек при сбросе
   const handleReset = async () => {
     localStorage.clear();
     try {
@@ -152,6 +148,42 @@ function App() {
   const targetEntities = mode === 'EXPENSE' 
     ? entities.filter(e => Number(e.roleid) === 7) 
     : entities.filter(e => Number(e.roleid) === 5);
+
+  // NEW: Если ключа в памяти Chrome нет — показываем стильный экран авторизации
+  if (!wmsKey) {
+    const lockScreenStyle = { display: 'flex', flexDirection: 'column', height: '100vh', justifyContent: 'center', alignItems: 'center', backgroundColor: '#f3f4f6', padding: '20px', boxSizing: 'border-box' };
+    const lockCardStyle = { backgroundColor: 'white', padding: '30px', borderRadius: '16px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', width: '100%', maxWidth: '400px', boxSizing: 'border-box' };
+
+    return (
+      <div style={lockScreenStyle}>
+        <div style={lockCardStyle}>
+          <h2 style={{ color: '#111827', marginBottom: '10px', textAlign: 'center' }}>⛵ Sailboat WMS</h2>
+          <p style={{ color: '#6B7280', fontSize: '13px', marginBottom: '20px', textAlign: 'center' }}>
+            Доступ ограничен. Введите персональный ключ доступа.
+          </p>
+          <input 
+            type="password" 
+            style={{ ...searchInputStyle, marginBottom: '15px' }} 
+            placeholder="Секретный ключ (например: av8520)" 
+            value={inputKey}
+            onChange={e => setInputKey(e.target.value)}
+          />
+          <button 
+            onClick={() => {
+              if (inputKey.trim()) {
+                localStorage.setItem('wms_access_key', inputKey.trim());
+                setWmsKey(inputKey.trim());
+                window.location.reload();
+              }
+            }} 
+            style={{ ...actionBtnStyle, marginTop: '10px', textAlign: 'center', width: '100%' }}
+          >
+            Войти в систему
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', maxWidth: '800px', margin: '0 auto' }}>
@@ -220,7 +252,6 @@ function App() {
             <button onClick={() => setView('list')} style={backBtnStyle}>← К списку артикулов</button>
             <h4>Выбор размера (SKU): {selectedArticul}</h4>
             {[...new Set(filteredStocks.filter(s => s.articulstore === selectedArticul).map(s => `${s.size_name}_${s.length_id}`))].map(skuKey => {
-              // NEW: Суммирование остатков по всем выбранным складам для каждого размера
               const [sizeVal, lenVal] = skuKey.split('_');
               const skuItems = filteredStocks.filter(s => s.articulstore === selectedArticul && s.size_name === sizeVal && String(s.length_id) === String(lenVal));
               const totalQty = skuItems.reduce((sum, item) => sum + Number(item.qty), 0);
@@ -245,7 +276,6 @@ function App() {
         )}
 
         {view === 'target_list' && (() => {
-          // NEW: Группировка дубликатов партий по складам (одна карточка на один склад с общей суммой)
           const skuItems = filteredStocks.filter(
             s => s.articulstore === selectedArticul && 
                  s.size_name === selectedSku.size && 
@@ -280,7 +310,6 @@ function App() {
 
               {warehouseGroups.map(group => {
                 const warehouseEntity = entities.find(e => Number(e.id) === group.objectid);
-                // Берём первую доступную партию с остатком для проведения списания
                 const activeItem = group.items.find(i => Number(i.qty) > 0) || group.items[0];
 
                 return (

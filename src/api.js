@@ -1,6 +1,4 @@
-// ИЗМЕНЕНО: Адрес теперь смотрит в интернет на твой домен
 const API_BASE = 'https://api.40par.ru/api/wms';
-// ВАЖНО: Пароль должен быть в точности как в .env на сервере!
 const WMS_TOKEN = '40par_secure_sklad_2026_xyz'; 
 
 export const wmsApi = {
@@ -9,7 +7,9 @@ export const wmsApi = {
       method: 'GET',
       headers: { 
         'x-wms-auth': WMS_TOKEN,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        // NEW: Передаем личный ключ сотрудника из памяти браузера при скачивании
+        'x-employee-key': localStorage.getItem('wms_access_key') || ''
       }
     });
     if (res.status === 401) throw new Error('Неверный токен доступа на сервере');
@@ -22,7 +22,9 @@ export const wmsApi = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-wms-auth': WMS_TOKEN
+        'x-wms-auth': WMS_TOKEN,
+        // NEW: Передаем личный ключ сотрудника из памяти браузера при отправке операций
+        'x-employee-key': localStorage.getItem('wms_access_key') || ''
       },
       body: JSON.stringify({ operations })
     });
