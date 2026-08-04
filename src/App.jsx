@@ -164,7 +164,7 @@ function App() {
           <input 
             type="password" 
             style={{ ...searchInputStyle, marginBottom: '15px' }} 
-            placeholder="Секретный ключ (например: av8520)" 
+            placeholder="Секретный ключ (например: av0000)" 
             value={inputKey}
             onChange={e => setInputKey(e.target.value)}
           />
