@@ -103,13 +103,43 @@ function App() {
     }
   };
 
-  const switchMode = (newMode) => {
+
+    const switchMode = (newMode) => {
     setMode(newMode);
     setView('list');
     setSearchQuery('');
     setSelectedArticul(null);
   };
 
+  // NEW: Умный обработчик сканирования номенклатуры (Артикул_Размер_Рост)
+  const handleSearchChange = (val) => {
+    setSearchQuery(val);
+    
+    const trimmed = val.trim();
+    const parts = trimmed.split('_');
+
+    // Если сканер вставил полную номенклатуру формата Артикул_Размер_Рост (3 части)
+    if (parts.length === 3) {
+      const [art, size, len] = parts;
+
+      // Проверяем, существует ли такой SKU реально на остатках
+      const skuExists = stocks.some(s => 
+        s.articulstore?.toLowerCase() === art.toLowerCase() &&
+        s.size_name?.toLowerCase() === size.toLowerCase() &&
+        String(s.length_id) === String(len)
+      );
+
+      if (skuExists) {
+        // Автоматически выбираем артикул и размер и переходим к выбору склада списания
+        setSelectedArticul(art.toUpperCase());
+        setSelectedSku({ size, length: len });
+        setView('target_list');
+        setSearchQuery(''); // Очищаем поле поиска для следующего сканирования!
+      }
+    }
+  };
+
+  // NEW: Восстановили кнопку СБРОС (handleReset), которую случайно затерли при прошлой вставке
   const handleReset = async () => {
     localStorage.clear();
     try {
@@ -211,7 +241,8 @@ function App() {
               style={searchInputStyle}
               placeholder="🔍 Артикул, штрихкод или алиас (от 3 знаков)..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              // CHANGED: Подключили умный обработчик вместо простого сохранения текста
+              onChange={(e) => handleSearchChange(e.target.value)}
             />
             {searchQuery && <button onClick={() => setSearchQuery('')} style={clearSearchBtnStyle}>✕</button>}
           </div>
