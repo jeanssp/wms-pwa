@@ -1,6 +1,11 @@
 name: Manual Deploy WMS PWA
 
 on:
+  # NEW: Деплой будет запускаться автоматически при каждом пуше в ветку main
+  push:
+    branches:
+      - main
+  # Оставляем ручную кнопку в интерфейсе GitHub на всякий случай
   workflow_dispatch:
 
 jobs:
